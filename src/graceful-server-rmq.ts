@@ -70,22 +70,43 @@ export class GracefulServerRMQ extends ServerRMQ {
   }
 
   async close(): Promise<void> {
-    this.closing = true;
-
-    if (this.channel) {
-      await this.channel.removeSetup(undefined, (channel: Channel) =>
-        channel.cancel(this.consumerTag),
-      );
+    this.initiateClosing();
+  
+    if (this.consumerTag && this.channel) {
+      await this.cancelConsumption();
     }
+  
+    await this.waitForHandlersCompletion();
+  
+    this.cleanupAfterClose();
+  }
+  
+  private initiateClosing(): void {
+    this.closing = true;
+  }
+  
+  private async cancelConsumption(): Promise<void> {
+    await this.channel.removeSetup(undefined, (channel: Channel) =>
+      channel.cancel(this.consumerTag),
+    );
     this.consumerTag = null;
-
+  }
+  
+  private async waitForHandlersCompletion(): Promise<void> {
+    if (this.waitingEndingHandlersTimeoutMs <= 0) {
+      await this.waitingHandlers();
+      return;
+    }
+  
     await Promise.race([
       this.waitingHandlers(),
-      this.waitingEndingHandlersTimeoutMs > 0 &&
-        sleep(this.waitingEndingHandlersTimeoutMs),
+      sleep(this.waitingEndingHandlersTimeoutMs),
     ]);
-
+  }
+  
+  private cleanupAfterClose(): void {
     this.runningMessages = 0;
     super.close();
   }
+
 }
